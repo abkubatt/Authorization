@@ -9,7 +9,7 @@ public interface AuthService {
 
     ResponseEntity<?> logIn(String login, String password);
 
-    String sendCode(String email);
+    ResponseEntity<?> sendCode(String email);
 
     ResponseEntity<?> confirmation(String email, String code);
 

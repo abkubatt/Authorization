@@ -4,14 +4,14 @@ import kg.megacom.authorization.config.EmailSender;
 import kg.megacom.authorization.exceptions.SignInErrorException;
 import kg.megacom.authorization.models.dtos.AccountDto;
 import kg.megacom.authorization.models.dtos.RoleDto;
+import kg.megacom.authorization.models.dtos.UserCodeDto;
 import kg.megacom.authorization.models.dtos.UserDto;
 import kg.megacom.authorization.models.entities.Role;
+import kg.megacom.authorization.models.entities.UserCode;
 import kg.megacom.authorization.models.request.SignInRequest;
 import kg.megacom.authorization.models.response.Message;
-import kg.megacom.authorization.services.AccountService;
-import kg.megacom.authorization.services.AuthService;
-import kg.megacom.authorization.services.RoleService;
-import kg.megacom.authorization.services.UserService;
+import kg.megacom.authorization.services.*;
+import kg.megacom.authorization.utils.ConfirmCodeGenerator;
 import org.apache.tomcat.util.buf.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -22,20 +22,19 @@ import org.springframework.stereotype.Service;
 import javax.validation.ConstraintViolation;
 import javax.validation.Validation;
 import javax.validation.Validator;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 
 
 @Service
 public class AuthServiceImpl implements AuthService {
-    @Autowired
-    private UserService userService;
-    @Autowired
-    private AccountService accountService;
-    @Autowired
-    private RoleService roleService;
-    @Autowired
-    private EmailSender emailSender;
+    @Autowired private UserService userService;
+    @Autowired private AccountService accountService;
+    @Autowired private RoleService roleService;
+    @Autowired private EmailSender emailSender;
+    @Autowired private ConfirmCodeGenerator confirmCodeGenerator;
+    @Autowired private UserCodeService userCodeService;
 
     @Override
     public ResponseEntity<?> signIn(SignInRequest signInRequest) {
@@ -46,19 +45,9 @@ public class AuthServiceImpl implements AuthService {
             return new ResponseEntity<>(Message.of("Пользователь с данным email уже зарегистрирован"), HttpStatus.NOT_ACCEPTABLE);
         }
 
-        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-        Set<ConstraintViolation<SignInRequest>> constraintViolations = validator.validate(signInRequest);
-
-        if (constraintViolations.size() > 0) {
-            Set<String> violationMessages = new HashSet<String>();
-
-            for (ConstraintViolation<SignInRequest> constraintViolation : constraintViolations) {
-                violationMessages.add(constraintViolation.getPropertyPath() + ": " + constraintViolation.getMessage());
-            }
-
-            return new ResponseEntity<>(Message.of("Неверные данные:\n" + StringUtils.join(violationMessages, '\n')), HttpStatus.NOT_ACCEPTABLE);
-
-         //   throw new RuntimeException("Неверные данные:\n" + StringUtils.join(violationMessages, '\n'));
+        String violationResponse = validateConstraints(signInRequest);
+        if(violationResponse != null){
+            return new ResponseEntity<>(Message.of(violationResponse), HttpStatus.NOT_ACCEPTABLE);
         }
 
         try {
@@ -80,10 +69,20 @@ public class AuthServiceImpl implements AuthService {
                     .build());
             System.out.println("OK");
             //вызвать метод sendCode, он вернет код, который был сгенерирован и отправлен на почту
+            ResponseEntity<?> codeSendResponse = sendCode(signInRequest.getEmail());
+
+            if(!codeSendResponse.getStatusCode().equals(HttpStatus.OK)) return codeSendResponse;
             //Надо сохранить этот код в нашей базе. Для этого создаем новый объект UserCode
+            UserCodeDto userCodeDto = UserCodeDto.builder()
+                    .user(userDto)
+                    .code(codeSendResponse.getBody().toString())
+                    .sentDate(new Date())
+                    .confirm(false)
+                    .build();
+            userCodeService.save(userCodeDto);
             // заполняем его поля
             //save UserCode - сохраняем
-            return new ResponseEntity<>(Message.of("Вы успешно зарегистрировались в системе"), HttpStatus.OK);
+            return new ResponseEntity<>(Message.of("Вам отправлен код подтверждения на email"), HttpStatus.OK);
         }catch (Exception ex){
             return new ResponseEntity<>(Message.of(ex.getMessage()), HttpStatus.NOT_ACCEPTABLE);
            // throw new SignInErrorException(ex.getMessage());
@@ -102,15 +101,20 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public String sendCode(String email) {
+    public ResponseEntity<?> sendCode(String email) {
         //generate random code - рандомно сгеренрировать 4-х значное число
+        String randCode = (int)(Math.random() * 10000) + "";
+        String code = confirmCodeGenerator.generatePassword(4);
+       // emailSender.sendSimpleMessage(email, "Код подтверждения", "Ваш код подтверждения: " + code);
+
         try {
-            emailSender.sendSimpleMessage(email, "Код подтверждения", "Ваш код подтверждения: " + "code");
+            emailSender.sendSimpleMessage(email, "Код подтверждения", "Ваш код подтверждения: " + randCode);
         }catch (Exception ex){
             // вернуть ответ с ошибкой, что произошла ошибка в процессе отправки кода
+            return new ResponseEntity<>(Message.of("Ошибка в процессе отправки кода на почту"), HttpStatus.NOT_IMPLEMENTED);
         }
         //return code;
-        return null;
+        return new ResponseEntity<>(randCode, HttpStatus.OK);
     }
 
     @Override
@@ -123,20 +127,19 @@ public class AuthServiceImpl implements AuthService {
         return null;
     }
 
-//    private String validateConstraints(Object object, String type){
-//        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-//        Set<ConstraintViolation<String>> constraintViolations = validator.validate(object);
-//
-//        if (constraintViolations.size() > 0) {
-//            Set<String> violationMessages = new HashSet<String>();
-//
-//            for (ConstraintViolation<String> constraintViolation : constraintViolations) {
-//                violationMessages.add(constraintViolation.getPropertyPath() + ": " + constraintViolation.getMessage());
-//            }
-//
-//            return new ResponseEntity<>(Message.of("Неверные данные:\n" + StringUtils.join(violationMessages, '\n')), HttpStatus.NOT_ACCEPTABLE);
-//
-//            //   throw new RuntimeException("Неверные данные:\n" + StringUtils.join(violationMessages, '\n'));
-//        }
-//    }
+    private <T> String validateConstraints(T object){
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+        Set<ConstraintViolation<T>> constraintViolations = validator.validate(object);
+
+        if (constraintViolations.size() > 0) {
+            Set<String> violationMessages = new HashSet<String>();
+
+            for (ConstraintViolation<T> constraintViolation : constraintViolations) {
+                violationMessages.add(constraintViolation.getPropertyPath() + ": " + constraintViolation.getMessage());
+            }
+
+            return "Неверные данные:\n" + StringUtils.join(violationMessages, '\n');
+        }
+        return null;
+    }
 }

@@ -12,6 +12,8 @@ public class EmailSender {
     private JavaMailSender emailSender;
 
     public void sendSimpleMessage(String to, String subject, String text) {
+        System.out.println(to);
+        System.out.println(subject);
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom("noreply@baeldung.com");
         message.setTo(to);

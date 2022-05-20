@@ -18,7 +18,8 @@ public class UserCode {
     @JoinColumn(name = "user_id")
     private User user;
     private String code;
-    @JsonFormat(pattern = "dd.MM.yyyy HH:mm:ss")
     private Date sentDate;
+    @Column
+    private Date expirationDate;
     private boolean confirm;
 }

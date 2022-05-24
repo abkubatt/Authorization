@@ -88,6 +88,10 @@ public class AuthServiceImpl implements AuthService {
         }else if(!accountDto.getPassword().equals(password)){
             return new ResponseEntity<>(Message.of("Не верный пароль"), HttpStatus.NOT_ACCEPTABLE);
         }
+        UserDto userDto = userService.findByEmail(login);
+        if (!userDto.isConfirm()){
+            return new ResponseEntity<>(Message.of("You have not verified the code"),HttpStatus.NOT_ACCEPTABLE);
+        }
         return new ResponseEntity<>(Message.of("Добро пожаловать в систему"), HttpStatus.OK);
     }
 
